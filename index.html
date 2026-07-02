@@ -22634,13 +22634,45 @@ async function generateDocx() {
   }]});
 
   const blob = await docx.Packer.toBlob(doc);
+
+  // 1. Download to computer
+  var fileName = (client+'_'+program+'_'+badgeText+'.docx').replace(/\s+/g,'_');
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = (client+'_'+program+'_Travel_Itinerary.docx').replace(/\s+/g,'_');
+  a.download = fileName;
   document.body.appendChild(a);
   a.click();
   setTimeout(function(){ URL.revokeObjectURL(url); document.body.removeChild(a); }, 100);
+
+  // 2. Save to Google Drive via Apps Script
+  try {
+    var reader = new FileReader();
+    reader.onloadend = function() {
+      var base64 = reader.result.split(',')[1];
+      var drivePayload = {
+        action:    'saveToDrive',
+        fileName:  fileName,
+        fileData:  base64,
+        docType:   badgeText, // 'MOBILISATION' or 'DEMOBILISATION'
+        client:    client,
+        program:   program,
+      };
+      fetch(SHEETS_URL, {
+        method: 'POST',
+        mode:   'no-cors',
+        headers:{ 'Content-Type': 'application/json' },
+        body:   JSON.stringify({ data: JSON.stringify(drivePayload) })
+      }).then(function(){
+        showToast('\u2714 Saved to Google Drive!');
+      }).catch(function(err){
+        console.warn('Drive save failed:', err);
+      });
+    };
+    reader.readAsDataURL(blob);
+  } catch(err) {
+    console.warn('Drive upload error:', err);
+  }
 }
 
 async function saveAndDownload() {
@@ -22662,7 +22694,12 @@ async function saveAndDownload() {
 async function submitToSheets() {
   const btn = document.getElementById('sheets-btn');
   const client  = v('f-client');
-  const program = (v('f-progtype')||'SWP') + (v('f-program')||'');
+  const _progtype = v('f-progtype') || 'SWP';
+  const _prognum  = v('f-program') || '';
+  // Avoid doubling prefix e.g. SWP+SWP34 → SWP34
+  const program = (_prognum.toUpperCase().startsWith(_progtype.toUpperCase()))
+    ? _prognum
+    : _progtype + (_prognum ? ' ' + _prognum : '');
 
   if (!client) { showToast('Please fill in Client name before saving'); return; }
 
@@ -22680,7 +22717,9 @@ async function submitToSheets() {
     trainer:      v('f-trainer'),
     contacts:     contacts.filter(c => c.name),
     workers,
-    steps:        getFlatSteps().map(function(s){ return { activity: s.activity, cat: s.cat, date: s.date, dep: s.dep, arr: s.arr }; })
+    steps:        getFlatSteps().map(function(s){ return { activity: s.activity, cat: s.cat, date: s.date, dep: s.dep, arr: s.arr }; }),
+    total_cost:   (function(){ var t=0; getFlatSteps().forEach(function(s){ t+=parseFloat(s.cost||0)+parseFloat(s.amount||0); if(s.rooms) s.rooms.forEach(function(r){ t+=parseFloat(r.cost||0)*parseInt(r.nights||1); }); if(s.workerCosts) s.workerCosts.forEach(function(wc){ t+=parseFloat(wc.cost||0); }); }); return t>0?'$'+t.toFixed(2):''; })(),
+    cost_breakdown: (function(){ var items=[]; getFlatSteps().forEach(function(s){ var c=parseFloat(s.cost||0)+parseFloat(s.amount||0); if(s.rooms) s.rooms.forEach(function(r){ c+=parseFloat(r.cost||0)*parseInt(r.nights||1); }); if(s.workerCosts) s.workerCosts.forEach(function(wc){ c+=parseFloat(wc.cost||0); }); if(c>0) items.push(s.activity+': $'+c.toFixed(2)); }); return items.join(' | '); })()
   };
 
   if (btn) { btn.textContent = '... Saving...'; btn.disabled = true; }
