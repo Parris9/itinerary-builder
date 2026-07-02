@@ -22382,6 +22382,12 @@ async function submitIncident() {
 
 
 async function generateDocx() {
+  console.log("generateDocx started");
+  // Guard — check docx library loaded
+  if (!docx || !docx.Document) {
+    showToast('Word library not loaded — try refreshing the page.');
+    return;
+  }
   const {
     Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
     Header, Footer, AlignmentType, BorderStyle, WidthType, ShadingType,
@@ -22627,8 +22633,7 @@ async function generateDocx() {
     children: children
   }]});
 
-  const buffer = await docx.Packer.toBuffer(doc);
-  const blob = new Blob([buffer], {type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});
+  const blob = await docx.Packer.toBlob(doc);
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -22642,10 +22647,15 @@ async function saveAndDownload() {
   var btn1 = document.getElementById('save-download-btn');
   var btn2 = document.getElementById('save-download-btn2');
   [btn1, btn2].forEach(function(b) { if(b) { b.textContent = 'Saving & downloading...'; b.disabled = true; } });
-  // Save to Google Sheets first
-  await submitToSheets();
-  // Then download the docx
-  await generateDocx();
+  // Save to Google Sheets (don't block download if it fails)
+  try { await submitToSheets(); } catch(e) { console.warn('Sheets save failed:', e); }
+  // Download the docx
+  try {
+    await generateDocx();
+  } catch(e) {
+    console.error('generateDocx error:', e);
+    showToast('Error generating Word doc: ' + e.message);
+  }
   [btn1, btn2].forEach(function(b) { if(b) { b.textContent = 'Save & Download'; b.disabled = false; } });
 }
 
